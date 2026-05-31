@@ -1,0 +1,283 @@
+================================================================================
+QUICK CURL REFERENCE - Copy & Paste Commands
+================================================================================
+
+Prerequisites:
+  - API_KEY="test-key" (from .env file)
+  - Server running on http://localhost:3000
+  - MongoDB running and connected
+
+================================================================================
+FLOW 1: HEALTH CHECK
+================================================================================
+
+curl -X GET http://localhost:3000/health
+
+Expected: {"status":"ok"}
+
+
+================================================================================
+FLOW 2: SINGLE-TURN QUERY
+================================================================================
+
+--- Step 1: Create a new job ---
+curl -X POST http://localhost:3000/chat/init \
+  -H "x-api-key: test-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What is recursion in programming?",
+    "sessionAttributes": {}
+  }'
+
+Expected:
+{
+  "jobId": "...",
+  "threadId": "507f1f77bcf86cd799439012",
+  "message": "Your request is being processed",
+  "sessionAttributes": {
+    "threadId": "507f1f77bcf86cd799439012"
+  }
+}
+
+SAVE THE threadId!
+
+
+--- Step 2: Wait 35 seconds (let cron process the job) ---
+sleep 35
+
+
+--- Step 3: Get the response ---
+curl -X GET http://localhost:3000/chat/notification \
+  -H "x-api-key: test-key"
+
+Expected (when ready):
+{
+  "hasResponse": true,
+  "response": "Recursion is a programming technique...",
+  "sessionAttributes": {
+    "threadId": "507f1f77bcf86cd799439012"
+  }
+}
+
+Expected (if not ready yet):
+{
+  "hasResponse": false,
+  "message": "No response yet, try asking a question",
+  "sessionAttributes": {}
+}
+
+
+================================================================================
+FLOW 3: MULTI-TURN CONVERSATION (Part 1: First Question)
+================================================================================
+
+--- Step 1: Ask first question ---
+curl -X POST http://localhost:3000/chat/init \
+  -H "x-api-key: test-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Explain binary search trees",
+    "sessionAttributes": {}
+  }'
+
+Expected: Get threadId from response
+SAVE THE threadId!
+
+
+--- Step 2: Wait 35 seconds ---
+sleep 35
+
+
+--- Step 3: Get first response ---
+curl -X GET "http://localhost:3000/chat/notification?threadId=YOUR_THREAD_ID" \
+  -H "x-api-key: test-key"
+
+(Replace YOUR_THREAD_ID with actual threadId)
+
+
+================================================================================
+FLOW 4: MULTI-TURN CONVERSATION (Part 2: Follow-up Question)
+================================================================================
+
+--- Step 1: Ask follow-up question (use same threadId) ---
+curl -X POST http://localhost:3000/chat/init \
+  -H "x-api-key: test-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Can you show me a code example?",
+    "sessionAttributes": {
+      "threadId": "YOUR_THREAD_ID"
+    }
+  }'
+
+(Replace YOUR_THREAD_ID with threadId from Flow 3)
+
+Expected: Previous conversation will be included in Cursor CLI context
+
+
+--- Step 2: Wait 35 seconds ---
+sleep 35
+
+
+--- Step 3: Get follow-up response (previous context included) ---
+curl -X GET "http://localhost:3000/chat/notification?threadId=YOUR_THREAD_ID" \
+  -H "x-api-key: test-key"
+
+
+================================================================================
+FLOW 5: ERROR CASES
+================================================================================
+
+--- 5a: Missing API Key (expect 401) ---
+curl -X GET http://localhost:3000/chat/notification
+
+Response: {"error":"Unauthorized"}
+
+
+--- 5b: Wrong API Key (expect 401) ---
+curl -X GET http://localhost:3000/chat/notification \
+  -H "x-api-key: wrong-key"
+
+Response: {"error":"Unauthorized"}
+
+
+--- 5c: Empty Query (expect 400) ---
+curl -X POST http://localhost:3000/chat/init \
+  -H "x-api-key: test-key" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "", "sessionAttributes": {}}'
+
+Response: {"error":"Query is required"}
+
+
+--- 5d: Invalid ThreadId (expect 400) ---
+curl -X POST http://localhost:3000/chat/init \
+  -H "x-api-key: test-key" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "test", "sessionAttributes": {"threadId": "invalid"}}'
+
+Response: {"error":"Invalid threadId"}
+
+
+================================================================================
+FLOW 6: BATCH TESTING
+================================================================================
+
+Run the automated test script:
+
+  chmod +x test-api.sh
+  ./test-api.sh
+
+This runs all flows automatically with 35-second waits between steps.
+
+
+================================================================================
+FLOW 7: MONGODB MONITORING
+================================================================================
+
+View jobs by status:
+  mongosh cursor-agent
+  db.jobs.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }])
+
+View all jobs with details:
+  db.jobs.find().pretty()
+
+View conversations for a thread:
+  db.conversations.find({ threadId: ObjectId("YOUR_THREAD_ID") }).pretty()
+
+View threads:
+  db.threads.find().pretty()
+
+
+================================================================================
+FLOW 8: COMMON VARIABLES
+================================================================================
+
+Set these variables for easier copy-pasting:
+
+  export API_KEY="test-key"
+  export BASE_URL="http://localhost:3000"
+  export THREAD_ID="your-thread-id-here"
+
+Then use like:
+
+  curl -X GET "$BASE_URL/chat/notification?threadId=$THREAD_ID" \
+    -H "x-api-key: $API_KEY"
+
+
+================================================================================
+FLOW 9: PRETTY PRINT WITH JQ
+================================================================================
+
+Add "| jq '.'" to any curl command for formatted JSON:
+
+  curl -X GET http://localhost:3000/health | jq '.'
+
+  curl -s -X GET "http://localhost:3000/chat/notification" \
+    -H "x-api-key: test-key" | jq '.'
+
+Install jq if needed:
+  macOS:  brew install jq
+  Ubuntu: sudo apt-get install jq
+
+
+================================================================================
+FLOW 10: VERBOSE MODE
+================================================================================
+
+Add "-v" flag for detailed debugging:
+
+  curl -v -X POST http://localhost:3000/chat/init \
+    -H "x-api-key: test-key" \
+    -H "Content-Type: application/json" \
+    -d '{"query": "test", "sessionAttributes": {}}'
+
+Shows:
+  - Request headers
+  - Response status code
+  - Response headers
+  - Response body
+
+
+================================================================================
+TYPICAL TIMELINE
+================================================================================
+
+T+0s:   POST /chat/init returns immediately
+        Job status: Pending
+        Response: {"jobId": "...", "threadId": "...", ...}
+
+T+0-30s: Job waits in queue
+         GET /chat/notification returns: {"hasResponse": false}
+
+T+30s:  Cron job picks up job
+        Job status: InProgress
+        Cursor CLI starts processing
+
+T+30-240s: Cursor CLI processes query with conversation history
+           GET /chat/notification still returns: {"hasResponse": false}
+
+T+240s (max): Timeout or completion
+              Job status: Processed or Failed
+
+T+240+: GET /chat/notification returns: {"hasResponse": true, "response": "..."}
+        Job status: Delivered after retrieval
+
+
+================================================================================
+TIPS
+================================================================================
+
+1. Always copy the threadId from POST /chat/init response for multi-turn
+2. Wait at least 35 seconds before checking notification (30s cron + buffer)
+3. Use filtering with ?threadId for specific conversation threads
+4. Check MongoDB to verify job status transitions
+5. Enable verbose mode (-v) if responses are unexpected
+6. Use jq to format JSON responses nicely
+7. Set shell variables to avoid retyping long values
+8. Test error cases to verify authentication works
+9. Check server logs (npm start output) for detailed processing info
+10. Look for "Cursor CLI timeout" errors if jobs fail
+
+
+================================================================================

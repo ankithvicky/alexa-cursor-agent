@@ -1,0 +1,494 @@
+================================================================================
+FLOW DIAGRAMS - Visual Representation of API Calls
+================================================================================
+
+
+================================================================================
+FLOW 1: HEALTH CHECK (Instant)
+================================================================================
+
+User/Client                    Express Server
+       │                              │
+       │  GET /health                │
+       ├─────────────────────────────>│
+       │                              │
+       │         {"status":"ok"}      │
+       │<─────────────────────────────┤
+       │                              │
+
+
+Command:
+  curl -X GET http://localhost:3000/health
+
+Response:
+  HTTP 200
+  {"status":"ok"}
+
+
+================================================================================
+FLOW 2: SINGLE-TURN QUERY (Sequential Steps)
+================================================================================
+
+Step 1: CREATE JOB (Instant Return)
+─────────────────────────────────────
+
+User/Client           Express Server              MongoDB
+       │                      │                        │
+       │  POST /chat/init      │                        │
+       │  (query="What is      │                        │
+       │   recursion?")        │                        │
+       ├─────────────────────> │                        │
+       │                       │  Create Job (Pending)  │
+       │                       ├───────────────────────>│
+       │                       │  Create Thread        │
+       │                       ├───────────────────────>│
+       │                       │  Create Conversation  │
+       │                       ├───────────────────────>│
+       │                       │  (user message)       │
+       │                       │  Fire-and-forget      │
+       │                       │  processJobs()        │
+       │                       │                        │
+       │  {"jobId":"...",      │                        │
+       │   "threadId":"..."}   │                        │
+       │<─────────────────────┤                        │
+       │                       │                        │
+
+Command:
+  curl -X POST http://localhost:3000/chat/init \
+    -H "x-api-key: test-key" \
+    -H "Content-Type: application/json" \
+    -d '{"query": "What is recursion?", "sessionAttributes": {}}'
+
+Response (Immediate):
+  {
+    "jobId": "507f1f77bcf86cd799439011",
+    "threadId": "507f1f77bcf86cd799439012",
+    "message": "Your request is being processed",
+    "sessionAttributes": {"threadId": "507f1f77bcf86cd799439012"}
+  }
+
+
+Step 2: WAIT FOR PROCESSING
+─────────────────────────────
+
+Timeline:
+
+  T+0s:   Job created (Pending)
+
+  T+0-30s: Job queued, waiting for cron
+
+  T+30s:  Cron triggers checkStuckJobs() and processJobs()
+          Job status → InProgress
+          Cursor CLI starts execution
+
+  T+30-240s: Cursor CLI processes request
+             (up to 4 minutes max)
+
+  T+240s: Job status → Processed
+          Response stored in DB
+
+
+Step 3: GET RESPONSE
+──────────────────
+
+User/Client           Express Server              MongoDB
+       │                      │                        │
+       │  GET /notification   │                        │
+       ├─────────────────────> │                        │
+       │                       │  Query Jobs (Processed)
+       │                       ├───────────────────────>│
+       │                       │<─── Job record
+       │                       │  Create Conversation   │
+       │                       ├───────────────────────>│
+       │                       │  (assistant message)   │
+       │                       │  Update Job (Delivered)│
+       │                       ├───────────────────────>│
+       │                       │                        │
+       │  {"hasResponse":true, │                        │
+       │   "response":"..."}   │                        │
+       │<─────────────────────┤                        │
+       │                       │                        │
+
+Command:
+  curl -X GET http://localhost:3000/chat/notification \
+    -H "x-api-key: test-key"
+
+Response (After processing):
+  {
+    "hasResponse": true,
+    "response": "Recursion is a programming technique where a function calls itself...",
+    "sessionAttributes": {"threadId": "507f1f77bcf86cd799439012"}
+  }
+
+Response (If not ready):
+  {
+    "hasResponse": false,
+    "message": "No response yet, try asking a question",
+    "sessionAttributes": {}
+  }
+
+
+================================================================================
+FLOW 3: MULTI-TURN CONVERSATION (3+ Steps)
+================================================================================
+
+Step 1: FIRST QUESTION (Same as Single-Turn Step 1)
+──────────────────────────────────────────────────
+
+Command:
+  curl -X POST http://localhost:3000/chat/init \
+    -H "x-api-key: test-key" \
+    -H "Content-Type: application/json" \
+    -d '{"query": "What is a binary tree?", "sessionAttributes": {}}'
+
+Response:
+  {
+    "jobId": "...",
+    "threadId": "abc123def456...",  ← SAVE THIS
+    "message": "Your request is being processed",
+    "sessionAttributes": {"threadId": "abc123def456..."}
+  }
+
+
+Step 2: WAIT & GET FIRST RESPONSE
+─────────────────────────────────
+
+Wait 35 seconds, then:
+
+Command:
+  curl -X GET "http://localhost:3000/chat/notification?threadId=abc123def456..." \
+    -H "x-api-key: test-key"
+
+Response:
+  {
+    "hasResponse": true,
+    "response": "A binary tree is a data structure...",
+    "sessionAttributes": {"threadId": "abc123def456..."}
+  }
+
+MongoDB State:
+  - Conversations collection has 2 entries for this threadId:
+    1. User: "What is a binary tree?"
+    2. Assistant: "A binary tree is..."
+
+
+Step 3: SECOND QUESTION (Follow-up)
+────────────────────────────────────
+
+User/Client           Express Server              MongoDB (Conversation History Fetched)
+       │                      │                        │
+       │  POST /chat/init     │                        │
+       │  (query="Can you     │                        │
+       │   give an example?") │                        │
+       │  (threadId from      │                        │
+       │   previous response) │                        │
+       ├─────────────────────> │                        │
+       │                       │  Fetch Conversation   │
+       │                       ├───────────────────────>│
+       │                       │<─── [User msg, Asst msg]
+       │                       │  Build context:       │
+       │                       │  "Previous conv:      │
+       │                       │   User: What is...    │
+       │                       │   Assistant: A...     │
+       │                       │   Current: Can you..."│
+       │                       │                        │
+       │                       │  Create Job (Pending)  │
+       │                       ├───────────────────────>│
+       │                       │  Create Conversation  │
+       │                       ├───────────────────────>│
+       │                       │  (new user message)   │
+       │                       │                        │
+       │  {"jobId":"...",      │                        │
+       │   "threadId":"..."}   │                        │
+       │<─────────────────────┤                        │
+       │                       │                        │
+
+Command:
+  curl -X POST http://localhost:3000/chat/init \
+    -H "x-api-key: test-key" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "query": "Can you give me a code example?",
+      "sessionAttributes": {
+        "threadId": "abc123def456..."
+      }
+    }'
+
+Response:
+  {
+    "jobId": "...",
+    "threadId": "abc123def456...",  ← Same threadId
+    "message": "Your request is being processed",
+    "sessionAttributes": {"threadId": "abc123def456..."}
+  }
+
+
+Step 4: WAIT & GET SECOND RESPONSE
+───────────────────────────────────
+
+Wait 35 seconds, then:
+
+Command:
+  curl -X GET "http://localhost:3000/chat/notification?threadId=abc123def456..." \
+    -H "x-api-key: test-key"
+
+Response (with context from previous messages):
+  {
+    "hasResponse": true,
+    "response": "Sure! Here's a code example of a binary tree: class TreeNode { ...",
+    "sessionAttributes": {"threadId": "abc123def456..."}
+  }
+
+MongoDB State:
+  - Conversations collection now has 4 entries for this threadId:
+    1. User: "What is a binary tree?"
+    2. Assistant: "A binary tree is..."
+    3. User: "Can you give me a code example?"
+    4. Assistant: "Sure! Here's a code example..."
+
+
+Step 5: THIRD TURN (Optional - Can Continue)
+──────────────────────────────────────────────
+
+Same pattern as Step 3-4 with the same threadId.
+Previous conversation (4 entries) + new query automatically included.
+
+
+================================================================================
+FLOW 4: DATABASE STATE TRANSITIONS
+================================================================================
+
+Single-Turn Query State Changes:
+
+Job Collection:
+  T+0s:    { _id: job1, status: "Pending", threadId: thread1, query: "..." }
+  T+30s:   { _id: job1, status: "InProgress", threadId: thread1, startedAt: Date }
+  T+240s:  { _id: job1, status: "Processed", response: "..." }
+  After notification: { _id: job1, status: "Delivered" }
+
+Thread Collection:
+  T+0s:    { _id: thread1, status: "active", createdAt: Date }
+  T+0s:    { _id: thread1, status: "active", updatedAt: Date }  (same after update)
+
+Conversation Collection (Single-Turn):
+  T+0s:    { _id: conv1, threadId: thread1, actor: "user", message: "What is...?" }
+  After notification: { _id: conv2, threadId: thread1, actor: "assistant", message: "..." }
+
+Conversation Collection (Multi-Turn):
+  T+0s:    { _id: conv1, threadId: thread1, actor: "user", message: "Question 1?" }
+  T+30s:   { _id: conv2, threadId: thread1, actor: "assistant", message: "Answer 1..." }
+  T+30s:   { _id: conv3, threadId: thread1, actor: "user", message: "Question 2?" }
+  T+60s:   { _id: conv4, threadId: thread1, actor: "assistant", message: "Answer 2..." }
+
+
+================================================================================
+FLOW 5: AUTHENTICATION STATE (Error Cases)
+================================================================================
+
+Missing API Key:
+───────────────
+
+User/Client           Express Server
+       │                      │
+       │  GET /notification   │
+       │  (no x-api-key)      │
+       ├─────────────────────> │
+       │                       │ Check header
+       │                       │ x-api-key missing
+       │                       │
+       │  {"error":"Unauthorized"} (401)
+       │<─────────────────────┤
+       │                       │
+
+Command:
+  curl -X GET http://localhost:3000/chat/notification
+
+Response (401):
+  {"error":"Unauthorized"}
+
+
+Wrong API Key:
+──────────────
+
+User/Client           Express Server
+       │                      │
+       │  GET /notification   │
+       │  (x-api-key: wrong)  │
+       ├─────────────────────> │
+       │                       │ Check header
+       │                       │ x-api-key != API_KEY env var
+       │                       │
+       │  {"error":"Unauthorized"} (401)
+       │<─────────────────────┤
+       │                       │
+
+Command:
+  curl -X GET http://localhost:3000/chat/notification \
+    -H "x-api-key: wrong-key"
+
+Response (401):
+  {"error":"Unauthorized"}
+
+
+================================================================================
+FLOW 6: JOB RETRY STATE MACHINE
+================================================================================
+
+Job Timeout Detection (checkStuckJobs):
+
+Job Status Flow with Retries:
+
+  Pending ──(worker picks up)──> InProgress
+                                    │
+                          (process starts)
+                                    │
+                      ┌─────────────┴─────────────┐
+                      │                           │
+              (completes in time)         (timeout after 5 min)
+                      │                           │
+                    Processed              Check retryCount
+                      │                           │
+            (notification called)    ┌────────────┴────────────┐
+                      │              │                         │
+                  Delivered      retryCount < 3            retryCount = 3
+                                    │                         │
+                          Reset to Pending            Status = Failed
+                          retryCount++
+                                    │
+                                    │
+                              ┌─────┘
+                              │
+                        (back in queue)
+                              │
+                        ──> Pending
+
+
+Example Timeline:
+
+  T+0s:     Job created (Pending, retryCount: 0)
+  T+30s:    Moved to InProgress, startedAt: T+30s
+  T+330s:   checkStuckJobs runs, T+330s - T+30s = 300s = 5 min
+            retryCount (0) < 3, so:
+            - Reset to Pending
+            - retryCount = 1
+            - startedAt = null
+  T+360s:   Cron picks it up again
+            Moved to InProgress, startedAt: T+360s
+  T+660s:   checkStuckJobs runs again
+            Moved back to Pending, retryCount = 2
+  T+690s:   Cron picks it up third time
+  T+930s:   checkStuckJobs runs
+            retryCount = 3, so Status = Failed
+            Stays in Failed forever
+
+
+================================================================================
+FLOW 7: BATCH TEST SCRIPT FLOW
+================================================================================
+
+Running: ./test-api.sh
+
+┌─────────────────────────────────────────────────────────┐
+│ 1. Health Check                                         │
+│    curl -X GET http://localhost:3000/health             │
+│    Verify server is running                             │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│ 2. Single-Turn Query (35 second wait)                   │
+│    - POST /chat/init                                    │
+│    - Sleep 35s                                          │
+│    - GET /chat/notification                             │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│ 3. Multi-Turn Conversation (70 second total wait)       │
+│    - POST /chat/init (first question)                   │
+│    - Sleep 35s                                          │
+│    - GET /chat/notification                             │
+│    - POST /chat/init (follow-up with threadId)          │
+│    - Sleep 35s                                          │
+│    - GET /chat/notification (with threadId filter)      │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│ 4. Error Cases (instant checks)                         │
+│    - Missing API Key (expect 401)                       │
+│    - Wrong API Key (expect 401)                         │
+│    - Empty Query (expect 400)                           │
+│    - Invalid ThreadId (expect 400)                      │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+                   ✓ All tests complete
+
+
+Total Runtime: ~140 seconds (2m 20s)
+
+
+================================================================================
+FLOW 8: CRON JOB TIMING
+================================================================================
+
+Every 30 seconds, cron runs:
+
+  ┌─────────────────────────────────────────────────┐
+  │ Cron: */30 * * * * * (every 30 seconds)         │
+  └─────────────────────────────────────────────────┘
+           │
+           ▼
+  ┌─────────────────────────────────────────────────┐
+  │ 1. checkStuckJobs()                             │
+  │    - Find jobs where:                           │
+  │      status = InProgress AND                    │
+  │      (now - startedAt) > 5 minutes              │
+  │    - If retryCount < 3: Reset to Pending       │
+  │    - Else: Set to Failed                        │
+  └─────────────────────────────────────────────────┘
+           │
+           ▼
+  ┌─────────────────────────────────────────────────┐
+  │ 2. processJobs()                                │
+  │    - Check if worker already running            │
+  │    - Get first Pending job                      │
+  │    - Set status to InProgress                   │
+  │    - Fetch conversation history                 │
+  │    - Execute Cursor CLI with context            │
+  │    - Set status to Processed or Failed          │
+  └─────────────────────────────────────────────────┘
+           │
+           ▼
+      Wait 30 seconds
+      (repeat)
+
+
+Example Timeline with Multiple Jobs:
+
+  Queue: [Job1(Pending), Job2(Pending), Job3(Pending)]
+
+  T+0s:   Job1 created, Job2 created
+  T+30s:  Cron runs → processJobs() picks Job1
+          Job1 → InProgress
+          Queue: [Job1(InProgress), Job2(Pending), Job3(Pending)]
+
+  T+60s:  Cron runs → processJobs() picks Job2
+          Job1 still InProgress
+          Job2 → InProgress
+          Queue: [Job1(InProgress), Job2(InProgress), Job3(Pending)]
+
+  T+90s:  Cron runs → processJobs() checks if running
+          Job1 still InProgress, Job2 still InProgress
+          Returns (worker already running)
+          Queue: [Job1(InProgress), Job2(InProgress), Job3(Pending)]
+
+  T+120s: Cron runs → Job1 completes
+          Job1 → Processed
+          processJobs() picks Job3
+          Job3 → InProgress
+          Queue: [Job1(Processed), Job2(InProgress), Job3(InProgress)]
+
+
+================================================================================

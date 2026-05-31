@@ -1,0 +1,56 @@
+cursor-agent/
+│
+├── src/
+│   ├── config/
+│   │   └── database.js                 # MongoDB connection handler
+│   ├── controllers/
+│   │   └── chatController.js           # Request handlers (initChat, getNotification)
+│   ├── models/
+│   │   ├── Conversation.js             # Message history schema
+│   │   ├── Job.js                      # Job tracking schema
+│   │   └── Thread.js                   # Thread/conversation state schema
+│   ├── routes/
+│   │   └── chat.js                     # API route definitions
+│   ├── utils/
+│   │   ├── cursorCli.js                # Cursor CLI wrapper (askCursor)
+│   │   └── middleware.js               # API key authentication
+│   ├── workers/
+│   │   └── jobWorker.js                # Job processing (processJobs, checkStuckJobs)
+│   └── server.js                       # Express app, MongoDB connection, cron setup
+│
+├── scripts/
+│   └── startup.sh                      # EC2 spot instance initialization
+│
+├── .env.example                        # Environment variable template
+├── .gitignore                          # Git exclusions
+├── package.json                        # Project dependencies
+├── README.md                           # Comprehensive documentation
+└── IMPLEMENTATION_SUMMARY.md           # This summary
+
+IMPLEMENTATION DETAILS:
+
+Directory Structure: 3 levels (src/ subdirectories)
+Total Files: 15 core files
+Dependencies: 5 main + 1 dev (express, mongoose, node-cron, dotenv, cors, nodemon)
+Database: MongoDB with 3 collections (Jobs, Threads, Conversations)
+
+KEY ENDPOINTS:
+  POST   /chat/init            → Create new job for query
+  GET    /chat/notification    → Retrieve processed response
+  GET    /health               → Health check
+
+JOB PROCESSING:
+  Trigger: Fire-and-forget on POST /chat/init + Cron every 30 seconds
+  Flow: Pending → InProgress → Processed → Delivered
+  Retry: Max 3 retries, reset after 5 minutes InProgress
+  Concurrency: Sequential (singleton flag)
+
+SECURITY:
+  Authentication: x-api-key header (API_KEY env var)
+  Encryption: Not implemented (use TLS/HTTPS in production)
+
+DEPLOYMENT:
+  Local: npm install && npm start
+  EC2: ./scripts/startup.sh (Ubuntu 22.04)
+  Process Manager: PM2 (on EC2)
+  Reverse Proxy: nginx (on EC2, port 80 → 3000)
