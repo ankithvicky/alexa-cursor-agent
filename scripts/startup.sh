@@ -18,6 +18,9 @@ apt-get install -y git curl
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 
+# Allow Node.js to bind to privileged ports (< 1024) without root
+setcap cap_net_bind_service=+ep $(which node)
+
 # Install PM2 globally (needs root)
 npm install -g pm2
 
