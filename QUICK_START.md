@@ -10,7 +10,6 @@ cp .env.example .env
 Edit `.env` and set your values:
 - `MONGODB_URI`: Your MongoDB connection string
 - `API_KEY`: Your secret API key (use this in x-api-key header)
-- `CURSOR_CLI_PATH`: Path to cursor executable (typically `/usr/local/bin/cursor`)
 - `CURSOR_API_KEY`: Your Cursor API key
 - `PORT`: Server port (default 3000)
 

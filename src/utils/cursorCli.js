@@ -1,11 +1,21 @@
 const { spawn, execSync } = require('child_process');
+const path = require('path');
+
+function resolveWorkdir() {
+  const dir = process.env.AGENT_WORKDIR || path.join(process.env.HOME || require('os').homedir(), 'workspace', 'agent');
+  return dir;
+}
 
 function resolveCursorPath() {
-  if (process.env.CURSOR_CLI_PATH) return process.env.CURSOR_CLI_PATH;
+  const home = process.env.HOME || require('os').homedir();
+  const localBin = `${home}/.local/bin`;
+  if (!process.env.PATH.includes(localBin)) {
+    process.env.PATH = `${localBin}:${process.env.PATH}`;
+  }
   try {
     return execSync('which agent', { encoding: 'utf8' }).trim();
   } catch {
-    throw new Error('agent binary not found — set CURSOR_CLI_PATH or ensure agent is on PATH');
+    throw new Error('agent binary not found — ensure agent is installed at ~/.local/bin/agent');
   }
 }
 
@@ -26,7 +36,7 @@ async function askCursor(context, query) {
       '--yolo',
       '--output-format', 'text',
       fullPrompt
-    ]);
+    ], { cwd: resolveWorkdir() });
 
     let output = '';
     let errorOutput = '';

@@ -69,7 +69,6 @@ cp .env.example .env
 ```bash
 MONGODB_URI=mongodb://localhost:27017/cursor-agent
 API_KEY=your-secret-api-key
-CURSOR_CLI_PATH=/usr/local/bin/cursor
 CURSOR_API_KEY=your-cursor-api-key
 PORT=3000
 ```
@@ -187,7 +186,6 @@ See `.env.example` for all available options:
 |----------|-------------|---------|
 | MONGODB_URI | MongoDB connection string | mongodb://localhost:27017/cursor-agent |
 | API_KEY | Secret key for API authentication | your-secret-key |
-| CURSOR_CLI_PATH | Path to Cursor CLI executable | /usr/local/bin/cursor |
 | CURSOR_API_KEY | Cursor API authentication key | your-cursor-key |
 | RESPONSE_INSTRUCTIONS | System prompt embedded in queries | "Provide concise responses..." |
 | PORT | Server port | 3000 |
@@ -266,9 +264,8 @@ curl -X POST http://localhost:3000/chat/init \
 ## Troubleshooting
 
 ### Cursor CLI not found
-- Ensure `CURSOR_CLI_PATH` in `.env` points to the correct executable
-- Run `which cursor` to find the installed location
-- Verify Cursor CLI is installed: `cursor --version`
+- Ensure `agent` is installed at `~/.local/bin/agent` (run `curl https://cursor.com/install -fsS | bash`)
+- Verify with: `~/.local/bin/agent --version`
 
 ### MongoDB connection errors
 - Verify MongoDB is running: `mongosh`

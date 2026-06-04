@@ -36,7 +36,6 @@ npm install
 cat > .env << EOF
 MONGODB_URI=your-mongodb-connection-string
 API_KEY=your-api-key-for-auth
-CURSOR_CLI_PATH=/root/.local/bin/agent
 CURSOR_API_KEY=your-cursor-api-key
 RESPONSE_INSTRUCTIONS="Provide concise responses under 8000 characters suitable for voice interaction via Alexa. Do not ask follow-up questions. Answer directly and completely in a single response."
 PORT=80
