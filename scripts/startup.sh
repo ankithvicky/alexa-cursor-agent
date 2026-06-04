@@ -11,28 +11,37 @@ done
 # Update system
 apt-get update && apt-get upgrade -y
 
-# Install git
+# Install git and curl
 apt-get install -y git curl
 
 # Install Node.js 20.x
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 
-# Install Cursor CLI
+# Install PM2 globally (needs root)
+npm install -g pm2
+
+# Create dedicated service user
+useradd -m -s /bin/bash cursoragent
+echo "cursoragent:Cursor@123" | chpasswd
+
+# Run all user-space setup as cursoragent
+sudo -u cursoragent -H bash << 'USERSCRIPT'
+set -e
+
+export PATH="$HOME/.cursor/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
+
+# Install Cursor CLI (installs to ~/.cursor/bin)
 curl https://cursor.com/install -fsS | bash
 
-# Add common install locations to PATH so `which` can find the binary
-export PATH="$PATH:/root/.cursor/bin:/root/.local/bin:/usr/local/bin:/usr/bin"
-
 # Clone repository
-cd /opt
-git clone YOUR_REPO_URL cursor-agent
-cd cursor-agent
+git clone YOUR_REPO_URL ~/cursor-agent
+cd ~/cursor-agent
 
 # Install dependencies
 npm install
 
-# Create environment file (hardcoded for spot instance)
+# Create environment file
 cat > .env << EOF
 MONGODB_URI=your-mongodb-connection-string
 API_KEY=your-api-key-for-auth
@@ -44,12 +53,15 @@ EOF
 # Export Cursor API key for CLI authentication
 export CURSOR_API_KEY=your-cursor-api-key
 
-# Install PM2 for process management
-npm install -g pm2
-
 # Start application with PM2
 pm2 start src/server.js --name cursor-agent
 pm2 save
-pm2 startup systemd -u root --hp /root
+USERSCRIPT
+
+# Set up PM2 systemd startup for cursoragent (must run as root)
+PM2_HOME=/home/cursoragent/.pm2 \
+  env PATH="$PATH:/usr/bin" /usr/lib/node_modules/pm2/bin/pm2 \
+  startup systemd -u cursoragent --hp /home/cursoragent | tail -1 | bash
 
 echo "Setup complete! Application running on port 80"
+echo "To test: sudo su - cursoragent   (password: Cursor@123)"
