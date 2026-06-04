@@ -8,14 +8,33 @@ function resolveWorkdir() {
 
 function resolveCursorPath() {
   const home = process.env.HOME || require('os').homedir();
-  const localBin = `${home}/.local/bin`;
-  if (!process.env.PATH.includes(localBin)) {
-    process.env.PATH = `${localBin}:${process.env.PATH}`;
+  console.log(`[cursorCli] HOME=${home}`);
+  const { existsSync } = require('fs');
+  const candidates = [
+    `${home}/.local/bin/agent`,
+    `${home}/.cursor/bin/agent`,
+    '/usr/local/bin/agent',
+    '/usr/bin/agent',
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  // Fall back to PATH-based lookup
+  const extraPaths = [
+    `${home}/.local/bin`,
+    `${home}/.cursor/bin`,
+    '/usr/local/bin',
+    '/usr/bin',
+  ];
+  for (const dir of extraPaths) {
+    if (!process.env.PATH.includes(dir)) {
+      process.env.PATH = `${dir}:${process.env.PATH}`;
+    }
   }
   try {
     return execSync('which agent', { encoding: 'utf8' }).trim();
   } catch {
-    throw new Error('agent binary not found — ensure agent is installed at ~/.local/bin/agent');
+    throw new Error(`agent binary not found — checked: ${candidates.join(', ')}`);
   }
 }
 
