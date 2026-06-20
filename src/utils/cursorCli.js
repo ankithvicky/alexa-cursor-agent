@@ -1,15 +1,16 @@
 const { spawn, execSync } = require('child_process');
 const path = require('path');
+const { existsSync, mkdirSync } = require('fs');
 
 function resolveWorkdir() {
-  const dir = process.env.AGENT_WORKDIR || path.join(process.env.HOME || require('os').homedir(), 'workspace', 'agent');
+  const dir = process.env.AGENT_WORKDIR ||
+    path.join(process.env.HOME || require('os').homedir(), 'workspace', 'agent');
+  mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 function resolveCursorPath() {
   const home = process.env.HOME || require('os').homedir();
-  console.log(`[cursorCli] HOME=${home}`);
-  const { existsSync } = require('fs');
   const candidates = [
     `${home}/.local/bin/agent`,
     `${home}/.cursor/bin/agent`,
@@ -19,13 +20,7 @@ function resolveCursorPath() {
   for (const p of candidates) {
     if (existsSync(p)) return p;
   }
-  // Fall back to PATH-based lookup
-  const extraPaths = [
-    `${home}/.local/bin`,
-    `${home}/.cursor/bin`,
-    '/usr/local/bin',
-    '/usr/bin',
-  ];
+  const extraPaths = [`${home}/.local/bin`, `${home}/.cursor/bin`, '/usr/local/bin', '/usr/bin'];
   for (const dir of extraPaths) {
     if (!process.env.PATH.includes(dir)) {
       process.env.PATH = `${dir}:${process.env.PATH}`;
@@ -39,17 +34,11 @@ function resolveCursorPath() {
 }
 
 async function askCursor(context, query) {
-  // Build full prompt with instructions and context
   let fullPrompt = process.env.RESPONSE_INSTRUCTIONS + '\n\n';
-
-  if (context) {
-    fullPrompt += context + '\n\n';
-  }
-
+  if (context) fullPrompt += context + '\n\n';
   fullPrompt += `Current question: ${query}`;
 
   return new Promise((resolve, reject) => {
-    // Spawn cursor agent command
     const cursor = spawn(resolveCursorPath(), [
       '-p',
       '--yolo',
@@ -75,7 +64,6 @@ async function askCursor(context, query) {
       reject(new Error(`Failed to spawn Cursor CLI: ${err.message}`));
     });
 
-    // Timeout after 4 minutes
     const timeout = setTimeout(() => {
       cursor.kill();
       reject(new Error('Cursor CLI timeout'));
